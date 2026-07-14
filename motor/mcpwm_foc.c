@@ -748,6 +748,19 @@ void mcpwm_foc_set_duty_noramp(float dutyCycle) {
 void mcpwm_foc_set_pid_speed(float rpm) {
 	volatile motor_all_state_t *motor = get_motor_now();
 
+#if defined(HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM) && !HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM
+	// When low-speed braking is disabled, do not leave the FOC speed
+	// controller active around zero speed. Releasing the motor switches to
+	// zero-current control and lets the normal current-off logic stop PWM.
+	// This avoids observer hunting and current/duty oscillations at standstill.
+	if (fabsf(rpm) < motor->m_conf->s_pid_min_erpm) {
+		motor->m_speed_command_rpm = rpm;
+		motor->m_speed_pid_set_rpm = rpm;
+		mcpwm_foc_release_motor();
+		return;
+	}
+#endif
+
 	if (motor->m_conf->s_pid_ramp_erpms_s > 0.0 ) {
 		if (motor->m_control_mode != CONTROL_MODE_SPEED ||
 				motor->m_state != MC_STATE_RUNNING) {
@@ -3186,11 +3199,16 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		motor_now->m_br_vq_before = vq_now;
 
 		// Brake when set ERPM is below min ERPM
+#ifndef HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM
+#define HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM 1
+#endif
+#if HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM
 		if (motor_now->m_control_mode == CONTROL_MODE_SPEED &&
 				fabsf(motor_now->m_speed_pid_set_rpm) < conf_now->s_pid_min_erpm) {
 			control_duty = true;
 			duty_set = 0.0;
 		}
+#endif
 
 		// Reset integrator when leaving duty cycle mode, as the windup protection is not too fast. Making
 		// better windup protection is probably better, but not easy.
