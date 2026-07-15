@@ -63,6 +63,53 @@ static void terminal_plot_hfi(int argc, const char **argv);
 static void timer_update(motor_all_state_t *motor, float dt);
 static void input_current_offset_measurement( void );
 static void hfi_update(volatile motor_all_state_t *motor, float dt);
+static float foc_openloop_raw_ramp_progress(const motor_all_state_t *motor);
+static float foc_openloop_ramp_factor(const motor_all_state_t *motor);
+static float foc_openloop_timer_rate(motor_all_state_t *motor, float dt);
+
+#ifndef HW_FOC_OPENLOOP_RAMP_S_CURVE
+#define HW_FOC_OPENLOOP_RAMP_S_CURVE 0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_BOOST
+#define HW_FOC_OPENLOOP_ADAPTIVE_BOOST 0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_RAMP
+#define HW_FOC_OPENLOOP_ADAPTIVE_RAMP 0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_IQ_REF
+#define HW_FOC_OPENLOOP_ADAPTIVE_IQ_REF 30.0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW
+#define HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW 0.70
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_LOAD_HIGH
+#define HW_FOC_OPENLOOP_ADAPTIVE_LOAD_HIGH 0.90
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_MIN_RATE
+#define HW_FOC_OPENLOOP_ADAPTIVE_MIN_RATE 0.20
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_IQ_TAU
+#define HW_FOC_OPENLOOP_ADAPTIVE_IQ_TAU 0.03
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_RATE_DOWN
+#define HW_FOC_OPENLOOP_ADAPTIVE_RATE_DOWN 8.0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_RATE_UP
+#define HW_FOC_OPENLOOP_ADAPTIVE_RATE_UP 2.0
+#endif
+
+#ifndef HW_FOC_OPENLOOP_ADAPTIVE_TIMEOUT_FACTOR
+#define HW_FOC_OPENLOOP_ADAPTIVE_TIMEOUT_FACTOR 2.5
+#endif
 
 // Threads
 static THD_WORKING_AREA(timer_thread_wa, 512);
@@ -164,6 +211,108 @@ static void update_hfi_samples(foc_hfi_samples samples, volatile motor_all_state
 	}
 
 	utils_sys_unlock_cnt();
+}
+
+// Return the unshaped progress of the sensorless open-loop speed ramp.
+// Lock is 0, the end of the ramp and the constant-speed phase are 1.
+static float foc_openloop_raw_ramp_progress(const motor_all_state_t *motor) {
+	const mc_configuration *conf = motor->m_conf;
+	const float t_lock = conf->foc_sl_openloop_time_lock;
+	const float t_ramp = conf->foc_sl_openloop_time_ramp;
+	const float t_const = conf->foc_sl_openloop_time;
+	const float elapsed = t_lock + t_ramp + t_const - motor->m_min_rpm_timer;
+
+	if (elapsed <= t_lock) {
+		return 0.0;
+	}
+
+	if (t_ramp <= 0.0 || elapsed >= (t_lock + t_ramp)) {
+		return 1.0;
+	}
+
+	float x = (elapsed - t_lock) / t_ramp;
+	utils_truncate_number(&x, 0.0, 1.0);
+	return x;
+}
+
+static float foc_openloop_ramp_factor(const motor_all_state_t *motor) {
+	const float x = foc_openloop_raw_ramp_progress(motor);
+
+#if HW_FOC_OPENLOOP_RAMP_S_CURVE
+	// Smoothstep: zero acceleration discontinuity at both ramp endpoints.
+	return x * x * (3.0 - 2.0 * x);
+#else
+	return x;
+#endif
+}
+
+// Scale the virtual open-loop timer according to measured Iq. Returning less
+// than one stretches only the ramp phase; lock and constant-speed times remain
+// unchanged. On timeout adaptation is disabled and the nominal rate resumes.
+static float foc_openloop_timer_rate(motor_all_state_t *motor, float dt) {
+#if HW_FOC_OPENLOOP_ADAPTIVE_RAMP
+	const mc_configuration *conf = motor->m_conf;
+	const float iq_abs = fabsf(motor->m_motor_state.iq_filter);
+	const float alpha = dt / (HW_FOC_OPENLOOP_ADAPTIVE_IQ_TAU + dt);
+	motor->m_openloop_iq_filtered += alpha * (iq_abs - motor->m_openloop_iq_filtered);
+	motor->m_openloop_elapsed += dt;
+
+	const float progress = foc_openloop_raw_ramp_progress(motor);
+	motor->m_openloop_progress = progress;
+
+	// Adapt only during the speed ramp. Lock and constant-speed phases use
+	// real time exactly as in the original algorithm.
+	if (progress <= 0.0 || progress >= 1.0) {
+		return 1.0;
+	}
+
+	const float timeout = conf->foc_sl_openloop_time_lock +
+			HW_FOC_OPENLOOP_ADAPTIVE_TIMEOUT_FACTOR * conf->foc_sl_openloop_time_ramp +
+			conf->foc_sl_openloop_time;
+	if (motor->m_openloop_elapsed > timeout) {
+		motor->m_openloop_adaptive_timed_out = true;
+		motor->m_openloop_ramp_rate = 1.0;
+		return 1.0;
+	}
+
+	float iq_ref = HW_FOC_OPENLOOP_ADAPTIVE_IQ_REF;
+	if (iq_ref < 1.0) {
+		iq_ref = conf->foc_sl_openloop_max_q;
+	}
+	if (iq_ref < 1.0) {
+		iq_ref = 1.0;
+	}
+
+	const float load = motor->m_openloop_iq_filtered / iq_ref;
+	float target_rate;
+	if (load <= HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW) {
+		target_rate = 1.0;
+	} else if (load < HW_FOC_OPENLOOP_ADAPTIVE_LOAD_HIGH) {
+		const float load_range = HW_FOC_OPENLOOP_ADAPTIVE_LOAD_HIGH - HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW;
+		const float x = (load - HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW) / load_range;
+		target_rate = 1.0 - x * (1.0 - HW_FOC_OPENLOOP_ADAPTIVE_MIN_RATE);
+	} else {
+		target_rate = HW_FOC_OPENLOOP_ADAPTIVE_MIN_RATE;
+	}
+
+	if (target_rate < motor->m_openloop_ramp_rate) {
+		motor->m_openloop_ramp_rate -= HW_FOC_OPENLOOP_ADAPTIVE_RATE_DOWN * dt;
+		if (motor->m_openloop_ramp_rate < target_rate) {
+			motor->m_openloop_ramp_rate = target_rate;
+		}
+	} else {
+		motor->m_openloop_ramp_rate += HW_FOC_OPENLOOP_ADAPTIVE_RATE_UP * dt;
+		if (motor->m_openloop_ramp_rate > target_rate) {
+			motor->m_openloop_ramp_rate = target_rate;
+		}
+	}
+
+	return motor->m_openloop_ramp_rate;
+#else
+	(void)motor;
+	(void)dt;
+	return 1.0;
+#endif
 }
 
 #pragma GCC push_options
@@ -3330,7 +3479,11 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 					motor_now->m_motor_state.phase = motor_now->m_phase_now_observer_override;
 					motor_now->m_observer_state.x1 = motor_now->m_observer_x1_override;
 					motor_now->m_observer_state.x2 = motor_now->m_observer_x2_override;
-					iq_set_tmp += conf_now->foc_sl_openloop_boost_q * SIGN(iq_set_tmp);
+					float openloop_boost_q = conf_now->foc_sl_openloop_boost_q;
+#if HW_FOC_OPENLOOP_ADAPTIVE_BOOST
+					openloop_boost_q *= 1.0 - foc_openloop_ramp_factor(motor_now);
+#endif
+					iq_set_tmp += openloop_boost_q * SIGN(iq_set_tmp);
 					if (conf_now->foc_sl_openloop_max_q > conf_now->cc_min_current) {
 						utils_truncate_number_abs(&iq_set_tmp, conf_now->foc_sl_openloop_max_q);
 					}
@@ -3814,13 +3967,7 @@ static void timer_update(motor_all_state_t *motor, float dt) {
 
 	float openloop_rpm = openloop_rpm_max;
 	if (conf_now->foc_sensor_mode != FOC_SENSOR_MODE_ENCODER) {
-		float time_fwd = t_lock + t_ramp + t_const - motor->m_min_rpm_timer;
-		if (time_fwd < t_lock) {
-			openloop_rpm = 0.0;
-		} else if (time_fwd < (t_lock + t_ramp)) {
-			openloop_rpm = utils_map(time_fwd, t_lock,
-					t_lock + t_ramp, 0.0, openloop_rpm);
-		}
+		openloop_rpm *= foc_openloop_ramp_factor(motor);
 	}
 
 	utils_truncate_number_abs(&openloop_rpm, openloop_rpm_max);
@@ -3855,6 +4002,11 @@ static void timer_update(motor_all_state_t *motor, float dt) {
 	if (motor->m_min_rpm_hyst_timer >= conf_now->foc_sl_openloop_hyst &&
 			motor->m_min_rpm_timer <= 0.0001) {
 		motor->m_min_rpm_timer = t_lock + t_ramp + t_const;
+		motor->m_openloop_iq_filtered = fabsf(motor->m_motor_state.iq_filter);
+		motor->m_openloop_ramp_rate = 1.0;
+		motor->m_openloop_progress = 0.0;
+		motor->m_openloop_elapsed = 0.0;
+		motor->m_openloop_adaptive_timed_out = false;
 		started_now = true;
 	}
 
@@ -3877,7 +4029,7 @@ static void timer_update(motor_all_state_t *motor, float dt) {
 
 		utils_norm_angle_rad((float*)&motor->m_phase_now_observer_override);
 		motor->m_phase_observer_override = true;
-		motor->m_min_rpm_timer -= dt;
+		motor->m_min_rpm_timer -= dt * foc_openloop_timer_rate(motor, dt);
 		motor->m_min_rpm_hyst_timer = 0.0;
 
 		// Set observer state to help it start tracking when leaving open loop.

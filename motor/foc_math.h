@@ -207,6 +207,11 @@ typedef struct {
 	float m_pid_div_angle_accumulator;
 	float m_min_rpm_hyst_timer;
 	float m_min_rpm_timer;
+	float m_openloop_iq_filtered;
+	float m_openloop_ramp_rate;
+	float m_openloop_progress;
+	float m_openloop_elapsed;
+	bool m_openloop_adaptive_timed_out;
 	bool m_cc_was_hfi;
 	float m_pos_i_term;
 	float m_pos_prev_error;
