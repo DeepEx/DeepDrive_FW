@@ -30,14 +30,14 @@
 #define HW_MINOR				0
 
 // Custom FW: DRV8353RH fault reset, motor release below minimum speed-PID
-// ERPM, Smoothstep sensorless startup, adaptive boost and Iq-loaded ramp.
+// ERPM and sensorless startup tuning.
 
 // HW properties
 #define HW_HAS_3_SHUNTS
 #define HW_SPEED_PID_BRAKE_BELOW_MIN_ERPM 0
 #define HW_FOC_OPENLOOP_RAMP_S_CURVE 1
-#define HW_FOC_OPENLOOP_ADAPTIVE_BOOST 1
-#define HW_FOC_OPENLOOP_ADAPTIVE_RAMP 1
+#define HW_FOC_OPENLOOP_ADAPTIVE_BOOST 0
+#define HW_FOC_OPENLOOP_ADAPTIVE_RAMP 0
 #define HW_FOC_OPENLOOP_ADAPTIVE_IQ_REF 30.0
 #define HW_FOC_OPENLOOP_ADAPTIVE_LOAD_LOW 0.70
 #define HW_FOC_OPENLOOP_ADAPTIVE_LOAD_HIGH 0.90
