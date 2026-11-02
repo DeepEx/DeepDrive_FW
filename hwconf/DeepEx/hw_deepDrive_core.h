@@ -257,9 +257,9 @@ void hw_reset_drv_faults(void);
 #endif
 
 // Setting limits
-#define HW_LIM_CURRENT			-3.0, 30.0
-#define HW_LIM_CURRENT_IN		-30.0, 30.0
-#define HW_LIM_CURRENT_ABS		0.0, 60.0
+#define HW_LIM_CURRENT			-3.0, 60.0
+#define HW_LIM_CURRENT_IN		-60.0, 60.0
+#define HW_LIM_CURRENT_ABS		0.0, 80.0
 #define HW_LIM_VIN				38.0, 90.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
