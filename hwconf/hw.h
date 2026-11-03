@@ -551,6 +551,12 @@
 #define HW_EARLY_INIT()
 #endif
 
+// Called once after conf_general_init(), when the emulated EEPROM is
+// available (e.g. to load hardware calibration stored in EEPROM_VARS_HW).
+#ifndef HW_POST_CONF_INIT_HOOK
+#define HW_POST_CONF_INIT_HOOK()
+#endif
+
 // Default ID
 #ifndef HW_DEFAULT_ID
 #define HW_DEFAULT_ID			(APPCONF_CONTROLLER_ID >= 0 ? APPCONF_CONTROLLER_ID : hw_id_from_uuid())

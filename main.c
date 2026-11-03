@@ -275,6 +275,7 @@ int main(void) {
 	LED_GREEN_OFF();
 
 	conf_general_init();
+	HW_POST_CONF_INIT_HOOK();
 
 	if (flash_helper_verify_flash_memory() == FAULT_CODE_FLASH_CORRUPTION)	{
 		// Loop here, it is not safe to run any code

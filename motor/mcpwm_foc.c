@@ -3152,7 +3152,13 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	
 #ifdef HW_HAS_3_SHUNTS	
 	// Calculate unbalance to detect bad sensor
-	motor_now->m_curr_unbalance = curr0 + curr1 + curr2;
+	// Per-phase calibration applied so that a gain mismatch between the shunt
+	// channels is not reported as unbalance (no change when CURRENT_CALx == 1.0).
+	if (is_second_motor) {
+		motor_now->m_curr_unbalance = curr0 * CURRENT_CAL1_M2 + curr1 * CURRENT_CAL2_M2 + curr2 * CURRENT_CAL3_M2;
+	} else {
+		motor_now->m_curr_unbalance = curr0 * CURRENT_CAL1 + curr1 * CURRENT_CAL2 + curr2 * CURRENT_CAL3;
+	}
 #endif	
 
 	// Scale to AMPs using calibrated scaling factors

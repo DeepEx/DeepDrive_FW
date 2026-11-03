@@ -137,8 +137,26 @@
 #define CURRENT_SHUNT_RES		0.0005
 #endif
 
+// Per-board calibration, stored in EEPROM_VARS_HW and loaded at boot by
+// HW_POST_CONF_INIT_HOOK(). Defaults (1.0 / 0.0) give the nominal scaling.
+// See hw_deepDrive_core.c, terminal commands dd_cal*.
+extern volatile float hw_dd_cal_i[3];		// per-phase current gain = nominal shunt / effective shunt
+extern volatile float hw_dd_cal_vin_gain;	// V_true = gain * V_nominal + offset
+extern volatile float hw_dd_cal_vin_ofs;
+extern volatile float hw_dd_cal_vph;		// phase-voltage sense factor
+
+void hw_deepdrive_load_calibration(void);
+#define HW_POST_CONF_INIT_HOOK()	hw_deepdrive_load_calibration()
+
+#define CURRENT_CAL1			(hw_dd_cal_i[0])
+#define CURRENT_CAL2			(hw_dd_cal_i[1])
+#define CURRENT_CAL3			(hw_dd_cal_i[2])
+#define ADC_VOLTS_PH_FACTOR		(hw_dd_cal_vph)
+#define ADC_VOLTS_INPUT_FACTOR	(hw_dd_cal_vin_gain)
+
 // Input voltage
-#define GET_INPUT_VOLTAGE()		((V_REG / 4095.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2))
+#define GET_INPUT_VOLTAGE_RAW()	((V_REG / 4095.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2))
+#define GET_INPUT_VOLTAGE()		(GET_INPUT_VOLTAGE_RAW() * hw_dd_cal_vin_gain + hw_dd_cal_vin_ofs)
 
 // NTC Termistors
 #define NTC_RES(adc_val)		((4095.0 * 10000.0) / adc_val - 10000.0)
