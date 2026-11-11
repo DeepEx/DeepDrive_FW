@@ -159,7 +159,7 @@ void hw_deepdrive_load_calibration(void);
 #define GET_INPUT_VOLTAGE()		(GET_INPUT_VOLTAGE_RAW() * hw_dd_cal_vin_gain + hw_dd_cal_vin_ofs)
 
 // NTC Termistors
-#define NTC_RES(adc_val)		((4095.0 * 10000.0) / adc_val - 10000.0)
+#define NTC_RES(adc_val)        ((4095.0 * 1000.0) / adc_val - 1000.0)   // NTC lato VDD, 1 kΩ verso massa
 #define NTC_TEMP(adc_ind)		(1.0 / ((logf(NTC_RES(ADC_Value[adc_ind]) / 10000.0) / 3380.0) + (1.0 / 298.15)) - 273.15)
 
 #define NTC_RES_MOTOR(adc_val)	(10000.0 / ((4095.0 / (float)adc_val) - 1.0)) // Motor temp sensor on low side
@@ -275,10 +275,10 @@ void hw_reset_drv_faults(void);
 #endif
 
 // Setting limits
-#define HW_LIM_CURRENT			-3.0, 60.0
+#define HW_LIM_CURRENT			-60.0, 60.0
 #define HW_LIM_CURRENT_IN		-60.0, 60.0
-#define HW_LIM_CURRENT_ABS		0.0, 80.0
-#define HW_LIM_VIN				38.0, 90.0
+#define HW_LIM_CURRENT_ABS		0.0, 100.0
+#define HW_LIM_VIN				20.0, 90.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
 #define HW_LIM_DUTY_MAX			0.0, 0.99
