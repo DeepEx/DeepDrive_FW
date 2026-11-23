@@ -38,6 +38,7 @@ void mc_interface_lock(void);
 void mc_interface_unlock(void);
 void mc_interface_lock_override_once(void);
 mc_fault_code mc_interface_get_fault(void);
+mc_fault_code mc_interface_get_last_fault(void);
 const char* mc_interface_fault_to_string(mc_fault_code fault);
 mc_state mc_interface_get_state(void);
 mc_control_mode mc_interface_get_control_mode(void);

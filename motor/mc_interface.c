@@ -57,6 +57,7 @@ volatile float ADC_curr_raw[6];
 typedef struct {
 	mc_configuration m_conf;
 	mc_fault_code m_fault_now;
+	volatile mc_fault_code m_last_fault; // latched by fault thread, cleared only on reboot
 	setup_stats m_stats;
 	int m_ignore_iterations;
 	int m_drv_fault_iterations;
@@ -163,8 +164,10 @@ static THD_FUNCTION(stat_thread, arg);
 
 void mc_interface_init(void) {
 	memset((void*)&m_motor_1, 0, sizeof(motor_if_state_t));
+	m_motor_1.m_last_fault = FAULT_CODE_NONE;
 #ifdef HW_HAS_DUAL_MOTORS
 	memset((void*)&m_motor_2, 0, sizeof(motor_if_state_t));
+	m_motor_2.m_last_fault = FAULT_CODE_NONE;
 #endif
 
 	conf_general_read_mc_configuration((mc_configuration*)&m_motor_1.m_conf, false);
@@ -466,6 +469,10 @@ void mc_interface_lock_override_once(void) {
 
 mc_fault_code mc_interface_get_fault(void) {
 	return motor_now()->m_fault_now;
+}
+
+mc_fault_code mc_interface_get_last_fault(void) {
+	return motor_now()->m_last_fault;
 }
 
 const char* mc_interface_fault_to_string(mc_fault_code fault) {
@@ -2987,6 +2994,9 @@ static THD_FUNCTION(fault_stop_thread, arg) {
 		}
 
 		motor->m_fault_now = fault_data_copy.fault_code;
+		if (fault_data_copy.fault_code != FAULT_CODE_NONE) {
+			motor->m_last_fault = fault_data_copy.fault_code;
+		}
 	}
 }
 

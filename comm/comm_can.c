@@ -1203,8 +1203,10 @@ void comm_can_send_status5(uint8_t id, bool replace) {
 	buffer_append_int32(buffer, mc_interface_get_tachometer_value(false), &send_index);
 	buffer_append_int16(buffer, (int16_t)(mc_interface_get_input_voltage_filtered() * 1e1), &send_index);
 	// DeepEx IF-0014 §6: bytes 6-7 = uint16 big-endian.
-	// Byte 7 (bits 0-7) = current mc_fault_code (0 = no fault); byte 6 reserved, must be 0.
-	buffer_append_uint16(buffer, (uint16_t)((uint8_t)mc_interface_get_fault()), &send_index);
+	// Byte 6 = last_fault_code (latched in fault thread, cleared only on reboot);
+	// byte 7 = current mc_fault_code (0 = no fault).
+	buffer_append_uint16(buffer, (uint16_t)(((uint16_t)(uint8_t)mc_interface_get_last_fault() << 8) |
+			(uint8_t)mc_interface_get_fault()), &send_index);
 	comm_can_transmit_eid_replace(id | ((uint32_t)CAN_PACKET_STATUS_5 << 8),
 			buffer, send_index, replace, 0);
 }
